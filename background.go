@@ -40,7 +40,13 @@ func main() {
 	current_path := filepath.Join(home, ".background", "current.txt")
 	image := ""
 
-	switch os.Args[1] {
+	if len(os.Args) == 1 {
+		image, err = setCurrent()
+		if err != nil {
+			log.Fatalf("Failed to read current image: %v", err)
+		}
+	} else {
+		switch os.Args[1] {
 		case "current", "-c":
 			image, err = setCurrent()
 			if err != nil {
@@ -95,6 +101,7 @@ func main() {
 			println("")
 		default:
 			image = os.Args[1]
+		}
 	}
 
 	image, err = findFile(images_dir, image)
