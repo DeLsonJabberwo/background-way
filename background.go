@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -77,7 +78,10 @@ func main() {
 			}
 			w.Flush()
 			println("")
-			return
+			image, err = setCurrent()
+			if err != nil {
+				log.Fatalf("Failed to read current image: %v", err)
+			}
 		case "--random", "--rand", "-r":
 			println("")
 			paths, err := os.ReadDir(images_dir)
@@ -106,7 +110,16 @@ func main() {
 
 	image, err = findFile(images_dir, image)
 	if err != nil {
-		log.Fatalf("Failed to find image: %v", err)
+		log.Printf("Failed to find image: %v", err)
+		// if failure, just do the current
+		image, err = setCurrent()
+		if err != nil {
+			log.Fatalf("Failed to read current image: %v", err)
+		}
+		image, err = findFile(images_dir, image)
+		if err != nil {
+			log.Fatalf("Failed to find image: %v", err)
+		}
 	}
 
 	logFile, err := os.OpenFile("/dev/null", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
@@ -122,13 +135,28 @@ func main() {
 		log.Fatalf("Failed to start swaybg: %v", err)
 	}
 
-	time.Sleep(500 * time.Millisecond) // Wait for initialization
-	if cmd.Process == nil || cmd.ProcessState != nil && cmd.ProcessState.Exited() {
-		log.Fatalf("swaybg failed to run or exited immediately")
+	appName := "swaybg"
+	countCmd := exec.Command("bash", "-c", fmt.Sprintf("ps -ef | grep %s | wc -l", appName))
+	var out bytes.Buffer
+	countCmd.Stdout = &out
+	err = countCmd.Run()
+	if err != nil {
+		log.Fatalf("Failed to execute command: %v", err)
+	}
+	output := strings.TrimSpace(out.String())
+	count, err := strconv.Atoi(output)
+	if err != nil {
+		log.Printf("Failed to convert output to integer: %v", err)
 	}
 
-	if err := exec.Command("pkill", "-o", "swaybg").Run(); err != nil {
-		log.Printf("Warning: pkill -o swaybg failed: %v", err) // Non-fatal
+	if count > 3 {
+		time.Sleep(500 * time.Millisecond) // Wait for initialization
+		if cmd.Process == nil || cmd.ProcessState != nil && cmd.ProcessState.Exited() {
+			log.Fatalf("swaybg failed to run or exited immediately")
+		}
+		if err := exec.Command("pkill", "-o", "swaybg").Run(); err != nil {
+			log.Printf("Warning: pkill -o swaybg failed: %v", err) // Non-fatal
+		}
 	}
 
 	//fmt.Printf("Background set to: %s\n", image)
@@ -169,6 +197,8 @@ func findFile(dir, file string) (string, error) {
 		return "", err
 	}
 
+	fileName := ""
+	err = fmt.Errorf("%v", file)
 	for _, entry := range entries {
 		path := filepath.Join(dir, entry.Name())
 		if entry.IsDir() {
@@ -177,14 +207,15 @@ func findFile(dir, file string) (string, error) {
 			}
 			return findFile(path, file)
 		} else {
-			fileName := entry.Name()
-			fileStem := strings.TrimSuffix(fileName, filepath.Ext(fileName))
-			if file == fileStem || file == fileName {
-				return fileName, nil
+			currFileName := entry.Name()
+			fileStem := strings.TrimSuffix(currFileName, filepath.Ext(currFileName))
+			if file == fileStem || file == currFileName {
+				fileName = currFileName
+				err = nil
 			}
 		}
 	}
-	return "", nil
+	return fileName, err
 }
 
 func getFileStem(filename string) (string) {
